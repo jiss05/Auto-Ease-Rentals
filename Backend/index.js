@@ -9,6 +9,11 @@ const bodyParser = require('body-parser');
 
 
 
+// importing routes
+const adminRoutes = require('./routes/v1/admin/admin')
+
+
+
 
 let app= express();
 
@@ -18,6 +23,13 @@ app.use(bodyParser.urlencoded({
 }));
 
 app.use(bodyParser.json({ limit: '150mb'}));
+
+
+// mounting the routes
+app.use('/api/v1/admin', adminRoutes);
+
+
+
 
 // port number for the server
 
@@ -29,6 +41,8 @@ app.use(function (req, res, next) {
     res.setHeader('Access-Control-Allow-Credentials', true);
     next();
 });
+
+
 
 
 // Security SetUp
