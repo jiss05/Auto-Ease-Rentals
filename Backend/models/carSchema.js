@@ -14,7 +14,7 @@ const carschema = new mongoose.Schema({
     required:true
   },
 
-  availableUnits: { type: Number, default: true },
+  availableUnits: { type: Number, default: 0 },
   location: {
     type: String,
     enum: ['Kottayam'], // since you have only one branch now
