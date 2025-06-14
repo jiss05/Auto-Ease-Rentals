@@ -10,7 +10,8 @@ const bodyParser = require('body-parser');
 
 
 // importing routes
-const adminRoutes = require('./routes/v1/admin/admin')
+const adminRoutes = require('./routes/v1/admin/admin');
+const userRoutes = require('./routes/v1/enduser/enduser');
 
 
 
@@ -27,6 +28,7 @@ app.use(bodyParser.json({ limit: '150mb'}));
 
 // mounting the routes
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/user', userRoutes);
 
 
 

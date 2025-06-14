@@ -8,6 +8,24 @@ const {login}= require('../../../models/login');
 const {Token} = require('../../../models/token');
 const {isAdmin} = require('../../../controllers/middleware');
 const { categorymodel } = require('../../../models/carcategorySchema');
+const {carmodel}=require('../../../models/carSchema');
+
+const multer =require('multer');
+// Multer setup
+const path = require('path');
+
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, path.join(__dirname, '../../../uploads'));
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const uploads = multer({ storage: storage });
+
+
 
 
 
@@ -160,7 +178,7 @@ router.post('/login',async (req,res)=>
         // generate JWT token
         const token = jwt.sign({ id: user.id, role: user.role, email: user.email },
          JWT_SECRET,
-        { expiresIn: '1h' });  
+        { expiresIn: '5h' });  `    `
         
         //save
 
@@ -185,13 +203,13 @@ router.post('/login',async (req,res)=>
 
 //add category by admin
 
-router.post('/add-category', isAdmin, async(req,res)=>{
+router.post('/add-category', isAdmin,uploads.single('image'), async(req,res)=>{
     try {
-        const { name, description, totalCars, availableCars, image } = req.body;
+        const { name, description} = req.body;
         
 
         // validate required field
-        if(!name || totalCars ==  null){
+        if(!name){
             return res.status(400).json({message:'Name and totalCars are required'});
 
             
@@ -209,10 +227,8 @@ router.post('/add-category', isAdmin, async(req,res)=>{
         const category=new categorymodel({
             name,
             description,
-            totalCars,
-            availableCars: availableCars ?? totalCars,
-            image
-        })
+            image:req.file.filename
+        });
 
         await category.save();
 
@@ -228,6 +244,213 @@ router.post('/add-category', isAdmin, async(req,res)=>{
     }
 });
 
+//Read alll categories by admin
+
+
+router.get('/getcategories',isAdmin,async(req,res)=>{
+    try {
+
+       
+
+            const categories = await categorymodel.find({status:true});
+            res.status(200).json({status:true, message:'Categories fetched successfully',
+                categories:categories
+            });
+    }
+        
+     catch (error) {
+        console.error(error);
+        res.status(500).json({status: false, message: 'Something went wrong'});
+        
+    }
+});
+
+//Update category  by admin
+
+router.put('/updatecategory/:id', isAdmin,uploads.single('image'),async(req,res)=>
+{
+    try {
+
+        const {id}  = req.params;
+        const {name,description}= req.body;
+        
+
+        // All fields to update should be in one object
+         const updateFields = { name, description };
+         
+        // If a new image was uploaded, update it
+        if (req.file) {
+        updateFields.image = req.file.filename;
+        }
+
+
+        const updatecategory = await categorymodel.findByIdAndUpdate(id,
+            updateFields,
+            
+
+            {new:true}
+
+        );
+        if(!updatecategory) {
+            return res.status(404).json({ status: false, message: 'Category not found' });
+        }
+
+        res.status(200).json({status:true,message:'Category updated successfully',
+            category:updatecategory
+        });
+
+        
+    } catch (error
+    )
+     { console.log(error)
+         res.status(500).json({ status: false, message: 'Something went wrong' });
+        
+    }
+});
+
+
+
+//delete category
+router.delete('/deletecategory/:id',isAdmin,async(req,res)=>{
+    try{
+        const {id} = req.params;
+
+        //soft delete
+        const deletecategory = await categorymodel.findByIdAndUpdate(
+            id,
+            {status : false},
+            {new: true}
+        );
+
+        if(!deletecategory)
+            {
+            return req.status(400).json({status : false, message:"Category not found"});
+        }
+        res.status(200).json({status : true,message:'DELETED SUCCESSFULLY',
+            category:deletecategory
+        });
+
+    }
+    catch(error){
+        console.log(error)
+        res.status(500).json({status: false, message:'Something went wrong'})
+    }
+});
+
+
+// route to add cars
+
+router.post('/add-car', isAdmin, uploads.single('image'), async (req, res) => {
+  try {
+    const { carName, categoryId, rentPerDay, description,totalUnits } = req.body;
+
+
+    // Check if category exists
+    const category = await categorymodel.findById(categoryId);
+    if (!category) {
+      return res.status(404).json({ status: false, message: 'Category not found' });
+    }
+
+    // Check for duplicate car in the same category
+    const existingCar = await carmodel.findOne({ carName, category: categoryId });
+    if (existingCar) {
+      return res.status(400).json({ status: false, message: 'Car with this name already exists in the selected category' });
+    }
+
+    // Create and save new car
+    const newCar = new carmodel({
+      carName,
+      category: categoryId,
+      rentPerDay,
+      totalUnits:totalUnits,
+      availableUnits:totalUnits,
+      image: [req.file.filename],
+      description
+    });
+    await newCar.save();
+
+    // this will update category totals
+    category.totalCars += Number(totalUnits);
+    category.availableCars += Number(totalUnits);
+    await category.save();
+
+    
+
+    res.status(201).json({ status: true, message: 'Car added successfully', car: newCar });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ status: false, message: 'Server error' });
+  }
+});
+
+
+// read cars by admin
+
+router.get('/all-cars', isAdmin, async (req, res) => {
+  try {
+    const cars = await carmodel.find();
+    res.json(cars);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+
+// update cars
+router.put('/update-car/:id', isAdmin, uploads.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { totalUnits, availableUnits } = req.body;
+
+    const total = Number(totalUnits);
+    const available = Number(availableUnits);
+
+    if (isNaN(total) || isNaN(available)) {
+      return res.status(400).json({ status: false, message: 'totalUnits or availableUnits is not a number' });
+    }
+
+    const updateFields = {
+      totalUnits: total,
+      availableUnits: available,
+    };
+
+    if (req.file) {
+      updateFields.image = req.file.filename;
+    }
+
+    const car = await carmodel.findByIdAndUpdate(id, updateFields, { new: true });
+    if (!car) {
+      return res.status(404).json({ status: false, message: 'Car not found' });
+    }
+
+    // Update Category Totals
+    const category = await categorymodel.findById(car.category);
+    if (category) {
+      // Get all cars under the same category to recalculate totals
+      const allCars = await carmodel.find({ category: car.category });
+
+      category.totalCars = allCars.reduce((sum, car) => sum + (car.totalUnits || 0), 0);
+      category.availableCars = allCars.reduce((sum, car) => sum + (car.availableUnits || 0), 0);
+
+      await category.save();
+    }
+
+    res.status(200).json({
+      status: true,
+      message: 'Car updated and category totals adjusted successfully',
+      car,
+    });
+
+  } catch (error) {
+    console.error('Update car error:', error);
+    res.status(500).json({ status: false, message: 'Something went wrong' });
+  }
+});
+
+
+
+
 
 
 module.exports = router;
+

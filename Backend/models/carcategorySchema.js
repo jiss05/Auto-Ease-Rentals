@@ -7,6 +7,10 @@ const categoryschema = new mongoose.Schema(
       required: true,
       enum: ['SUV', 'Sedan', 'Hatchback', 'Luxury','MUV','Coupe'],
     },
+        status: {
+      type: Boolean,
+      default: true
+    },
     description: {
       type: String,
     },
