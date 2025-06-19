@@ -68,6 +68,10 @@ const bookingschema = new mongoose.Schema({
 
   refundAmount: { type: Number, default: 0 }, // used when cancelling
 
+
+  paidAmount: { type: Number, default: 0 },
+
+
   bookingTimestamps: {
     bookedAt: { type: Date, default: Date.now },
     cancelledAt: { type: Date },

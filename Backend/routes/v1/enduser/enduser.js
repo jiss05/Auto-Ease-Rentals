@@ -569,9 +569,9 @@ router.delete('/del-cart', isUser, async (req, res) => {
     return res.status(500).json({ status: false, message: "Something went wrong" });
   }
 });
-
+//------------------------DIRECT BOOKING----------------------------------DIRECT BOOKING--------------------------------DIRECT BOOKING---------------------------------------------------------------------------------------------------
 /// BOOK NOW 
-// ✅ Book Now Route - Clean, Minimal
+
 router.post('/booknow', isUser, async (req, res) => {
   try {
 
@@ -748,6 +748,9 @@ router.put('/payment/:bookingId', isUser, async (req, res) => {
 
     res.status(200).json({
       message: 'Payment details updated successfully',
+      deliveryMethod:booking.deliveryMethod,
+      deliveryAddress:booking.deliveryAddress,
+      deliveryCharge:booking.deliveryCharge,
       totalAmount: booking.totalAmount,
       advanceAmount: booking.advanceAmount,
       paymentStatus: booking.paymentStatus
@@ -758,6 +761,147 @@ router.put('/payment/:bookingId', isUser, async (req, res) => {
     res.status(500).json({ message: 'Something went wrong' });
   }
 });
+
+
+//confirm BOOKING   >>>>>>
+
+
+router.put('/confirm-booking/:bookingId', isUser, async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const booking = await bookingmodel.findOne({ bookingId });
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    if (booking.bookingStatus === 'Completed') {
+      return res.status(400).json({ message: 'Booking already confirmed' });
+    }
+
+    const car = await carmodel.findById(booking.cars[0].carId);
+    if (!car) {
+      return res.status(404).json({ message: 'Car not found' });
+    }
+
+    const bookedQty = booking.cars[0].quantity;
+
+    if (car.availableUnits < bookedQty) {
+      return res.status(400).json({ message: 'Not enough cars available' });
+    }
+
+    // Reduce available units
+    car.availableUnits -= bookedQty;
+    await car.save();
+
+
+
+   // Also update the category
+    const category = await categorymodel.findById(car.category);
+    if (category && category.availableCars >= bookedQty) {
+    category.availableCars -= bookedQty;
+    await category.save();
+    }
+
+    // Update booking status
+    booking.bookingStatus = 'Completed';
+    booking.bookingTimestamps.bookedAt = new Date();
+    await booking.save();
+
+    res.status(200).json({
+      message: 'Booking confirmed successfully',
+      bookingStatus: booking.bookingStatus,
+      paymentMethod: booking.paymentMethod,
+      paymentStatus: booking.paymentStatus
+    });
+
+  } catch (error) {
+    console.error('Confirm Booking Error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+
+
+//view all bookins by user
+
+router.get('/view-bookings', isUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Fetch all bookings for the logged-in user
+    const bookings = await bookingmodel.find({ userId })
+      .populate('cars.carId', 'carName rentPerDay category') // optional: populate car details
+      .sort({ createdAt: -1 }); // recent first
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: 'No bookings found' });
+    }
+
+    res.status(200).json({
+      total: bookings.length,
+      bookings
+    });
+  } catch (error) {
+    console.error('View Orders Error:', error);
+    res.status(500).json({ message: 'Something went wrong' });
+  }
+});
+
+//Cancel  booking
+
+// routes/v1/enduser/enduser.js
+
+router.put('/cancel-booking/:bookingId', isUser, async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user._id;
+
+    // Find the booking
+    const booking = await bookingmodel.findOne({ bookingId, userId });
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    if (booking.bookingStatus === 'Cancelled') {
+      return res.status(400).json({ message: 'Booking already cancelled' });
+    }
+
+    // Restore available units in car
+    const car = await carmodel.findById(booking.cars[0].carId);
+    if (car) {
+      car.availableUnits += booking.cars[0].quantity;
+      await car.save();
+    }
+
+    // Restore category availableCars 
+    const category = await categorymodel.findById(car.category);
+    if (category) {
+      category.availableCars += booking.cars[0].quantity;
+      await category.save();
+    }
+
+    // Update booking status
+    booking.bookingStatus = 'Cancelled';
+    booking.isCancelledByUser = true;
+    booking.bookingTimestamps.cancelledAt = new Date();
+
+    await booking.save();
+
+    return res.status(200).json({
+      message: 'Booking cancelled successfully',
+      bookingId: booking.bookingId
+    });
+
+  } catch (error) {
+    console.error('Cancel Booking Error:', error);
+    res.status(500).json({ message: 'Something went wrong' });
+  }
+});
+
+
 
 
 
