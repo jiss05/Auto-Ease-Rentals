@@ -11,6 +11,10 @@ const jwt = require('jsonwebtoken');
 const{login : usermodel} =require('../../../models/login');
 const {isUser}= require('../../../controllers/middleware');
 
+
+const { v4: uuidv4 } = require('uuid');
+
+
 const{Token}= require('../../../models/token');
 const{Otp}= require('../../../models/otp');
 const sendEmail = require('../../../controllers/email');
@@ -18,6 +22,11 @@ const {bookingmodel}=require('../../../models/bookingschema');
 const {categorymodel}= require('../../../models/carcategorySchema');
 const {cartmodel} = require('../../../models/cartschema');
 const{carmodel} = require('../../../models/carSchema');
+
+
+
+//booking id
+const bookingId=uuidv4();
 
 
 
@@ -516,9 +525,245 @@ router.put('/update-cart', isUser, async (req, res) => {
 });
 
 
+// DELETE route: delete specific car from cart or clear entire cart
+router.delete('/del-cart', isUser, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { carId } = req.body; 
+
+    // Find the user's cart
+    let cart = await cartmodel.findOne({ user: userId });
+    if (!cart) {
+      return res.status(404).json({ status: false, message: "Cart not found" });
+    }
+
+    // If carId is provided, delete that specific car
+    if (carId) {
+      const itemIndex = cart.items.findIndex(item => item.car.toString() === carId);
+      if (itemIndex === -1) {
+        return res.status(404).json({ status: false, message: "Car not found in cart" });
+      }
+
+      cart.items.splice(itemIndex, 1); // Remove the specific car
+      await cart.save();
+
+      return res.status(200).json({
+        status: true,
+        message: "Selected car removed from cart",
+        updatedCart: cart
+      });
+    }
+
+    // If no carId is provided, clear the entire cart
+    cart.items = [];
+    await cart.save();
+
+    return res.status(200).json({
+      status: true,
+      message: "All items removed from cart",
+      updatedCart: cart
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ status: false, message: "Something went wrong" });
+  }
+});
+
+/// BOOK NOW 
+// ✅ Book Now Route - Clean, Minimal
+router.post('/booknow', isUser, async (req, res) => {
+  try {
+
+     // Get user ID from middleware (token)
+    const userId = req.user._id;
+    const { carId, quantity, pickupDate, dropDate, pickupTime, dropTime } = req.body;
+
+    // Check required fields
+    if (!carId || !quantity || !pickupDate || !dropDate || !pickupTime || !dropTime) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+   
+
+    // Fetch car from DB
+    const car = await carmodel.findById(carId);
+    if (!car) {
+      return res.status(404).json({ message: 'Car not found' });
+    }
 
 
-module.exports=router;
+
+
+    //Pickup date must be today or within next 5 days
+    const pickup = new Date(pickupDate);
+    const today = new Date();
+
+    pickup.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + 5); // today + 5 days
+
+    if (pickup < today || pickup > maxDate) {
+      return res.status(400).json({
+        message: 'Pickup date must be today or within the next 5 days only'
+      });
+    }
+
+
+
+
+
+
+
+    
+
+    // Calculate rental days
+    const drop = new Date(dropDate);
+    const rentalDays = Math.ceil((drop - pickup) / (1000 * 60 * 60 * 24)) + 1;
+    if (rentalDays <= 0) {
+      return res.status(400).json({ message: 'Drop date must be after pickup date' });
+    }
+
+    const [pickupHour, pickupMin] = pickupTime.split(':').map(Number);
+    const [dropHour, dropMin] = dropTime.split(':').map(Number);
+
+    const pickupTimeInMin = pickupHour * 60 + pickupMin;
+    const dropTimeInMin = dropHour * 60 + dropMin;
+
+    if (
+      pickup.toDateString() === drop.toDateString() && // same day
+      dropTimeInMin <= pickupTimeInMin
+    ) {
+      return res.status(400).json({
+        message: 'Drop time must be after pickup time on the same day'
+      });
+    }
+
+
+
+    // Calculate amount
+    const totalAmount = car.rentPerDay * quantity * rentalDays;
+    const advanceAmount = totalAmount / 2;
+
+    // Create booking
+    const newBooking = new bookingmodel({
+      bookingId: uuidv4(), // backend generates ID
+      userId,
+      cars: [{
+        carId: car._id,
+        carName: car.carName,
+        category: car.category,
+        rentPerDay: car.rentPerDay,
+        quantity: quantity
+      }],
+      pickupDate,
+      dropDate,
+      pickupTime,
+      dropTime,
+      rentalDays,
+      deliveryMethod: "Pick from AutoEase",
+      isDeliveryRequired: false,
+      distanceInKm: 0,
+      deliveryAddress: "",
+      deliveryCharge: 0,
+      totalAmount,
+      advanceAmount,
+      paymentMethod: "Online",
+      paymentStatus: "pending",
+      bookingStatus: "Booked"
+    });
+
+    await newBooking.save();
+
+    res.status(201).json({
+      message: 'Booking successful',
+      bookingId: newBooking.bookingId,
+      carName: car.name,
+      rentalDays,
+      totalAmount,
+      advanceAmount
+    });
+
+  } catch (error) {
+    console.error('Booking Error:', error);
+    res.status(500).json({ message: 'Something went wrong' });
+  }
+});
+
+
+
+
+// payment route
+
+
+router.put('/payment/:bookingId', isUser, async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { deliveryMethod, deliveryAddress, paymentMethod } = req.body;
+
+    // Validate required fields
+    if (!deliveryMethod || !paymentMethod) {
+      return res.status(400).json({ message: 'Delivery method and payment method are required' });
+    }
+
+    // Check valid delivery method
+    if (!['Pick from AutoEase', 'Home Delivery'].includes(deliveryMethod)) {
+      return res.status(400).json({ message: 'Invalid delivery method' });
+    }
+
+    // Check valid payment method
+    if (!['Online', 'Offline'].includes(paymentMethod)) {
+      return res.status(400).json({ message: 'Invalid payment method' });
+    }
+
+    const booking = await bookingmodel.findOne({ bookingId, userId: req.user._id });
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    // Home Delivery logic
+    let deliveryCharge = 0;
+    if (deliveryMethod === 'Home Delivery') {
+      if (!deliveryAddress || deliveryAddress.trim() === '') {
+        return res.status(400).json({ message: 'Delivery address is required for Home Delivery' });
+      }
+
+      deliveryCharge = 100; // Example fixed charge
+    }
+
+    // Update booking
+    booking.deliveryMethod = deliveryMethod;
+    booking.deliveryAddress = deliveryMethod === 'Home Delivery' ? deliveryAddress : '';
+    booking.isDeliveryRequired = deliveryMethod === 'Home Delivery';
+    booking.deliveryCharge = deliveryCharge;
+    booking.paymentMethod = paymentMethod;
+
+    booking.totalAmount += deliveryCharge;
+    booking.advanceAmount = booking.totalAmount / 2;
+
+    await booking.save();
+
+    res.status(200).json({
+      message: 'Payment details updated successfully',
+      totalAmount: booking.totalAmount,
+      advanceAmount: booking.advanceAmount,
+      paymentStatus: booking.paymentStatus
+    });
+
+  } catch (error) {
+    console.error('Payment Update Error:', error);
+    res.status(500).json({ message: 'Something went wrong' });
+  }
+});
+
+
+
+
+module.exports = router;
+
 
 
 
